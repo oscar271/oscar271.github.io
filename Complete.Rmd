@@ -1,0 +1,223 @@
+---
+title: "Predicting Student Performance with Multiple Linear Regression"
+author: "Your Name Here"
+date: "2025-05-08"
+output: html_document
+---
+
+Input data set using read.csv()
+```{r}
+df <- read.csv("/Users/yourUserName/Desktop/Student_Performance.csv", header = TRUE)
+```
+
+To find your file path make sure the csv file is located on your desktop for easy access. 
+Then, right click the file and select "Get Info" (Mac Users) or "Properties" (Windows Users)
+Lastly, the path file will be located next to "Where" (Mac Users) or "Location" (Windows Users)
+
+The general format for a file path for a file that is on your desktop is:
+"/Users/username/Desktop/filename.csv" for Mac Users
+"C:/Users/username/Desktop/filename.csv" for Windows Users
+
+Use str() to get info on the data
+```{r}
+str(df)
+```
+
+Lets clean this data set!
+
+When cleaning data we have to consider many potential defects with our data, the issues you encounter may depend on the context of the data itself:
+1. Missing values
+2. Duplicates
+3. Invalid data
+
+How many missing values does this data set have?
+```{r}
+sum(is.na(df))
+```
+
+Where are the missing values?
+```{r}
+colSums(is.na(df))
+```
+
+Use na.omit() to remove rows with missing data
+```{r}
+noMissingValues_df <- na.omit(df)
+
+nrow(noMissingValues_df)
+```
+
+Question: Data is valuable and expensive, what are some workarounds if we didn't want to delete this data?
+
+How many duplicates?
+```{r}
+dupeSum <- sum(duplicated(noMissingValues_df))
+dupeSum
+```
+
+Remove duplicates
+```{r}
+noDupes_df <- unique(noMissingValues_df)
+
+rowCount <- nrow(noDupes_df)
+rowCount
+```
+
+Binary encoding: turn "Yes" & "No" into 1 & 0 so our model can function properly.
+```{r}
+binaryEncoded_df <-noDupes_df
+binaryEncoded_df$Extracurricular.Activities <- ifelse(binaryEncoded_df$Extracurricular.Activities == "Yes", 1, 0)
+
+clean_df <- binaryEncoded_df
+print(head(clean_df))
+```
+
+Remove target variable for multicollinearity analysis:
+To put it simply, multicollinearity is a problem caused when two or more predictor variables in your model have a high correlation. Correlation between predictors is bad, but correlation from predictor to target is great! 
+```{r}
+variable_df<- clean_df[, !names(clean_df) %in% 'Performance.Index']
+print(head(variable_df))
+```
+
+Create correlation matrix: correlation values range from -1 to 1. A number closer to 1 or -1 indicates high correlation, while a number closer to 0 indicates low correlation. The diagonal of 1's is to be expected as a variable is perfectly correleted with itself. 
+```{r}
+corrmat <- cor(variable_df)
+print(corrmat)
+```
+
+Correlation Heatmap: since the above matrix is difficult to read, we can visualize it by creating a heatmap.
+```{r}
+#install.packages("corrplot")
+library(corrplot)
+corrplot(corrmat, method = "color", type = "full", 
+         col = colorRampPalette(c("red", "gold", "blue"))(200),
+         tl.cex = 0.6, tl.col = "black", title = "Correlation Heatmap")
+```
+
+80-20 Data Split: We must split our data in order to train it on the 80% and test it on the 20%. This is a very common split used in data science.
+```{r}
+nrows <- nrow(clean_df)
+trainsize <- round(0.8*nrows)
+trainindex <- sample(1:nrows, trainsize, replace = FALSE)
+
+train_df <- clean_df[trainindex, ]
+test_df <- clean_df[-trainindex, ]
+```
+
+Build model
+```{r}
+train_model <- lm(train_df$Performance.Index ~ train_df$Hours.Studied + train_df$Previous.Scores + train_df$Extracurricular.Activities + train_df$Sleep.Hours + train_df$Sample.Question.Papers.Practiced, data = train_df)
+
+summary(train_model)
+```
+
+Variance Inflation Factors (VIF): VIFs are values that measure collinearity. We want these values as close to 1 as possible.
+```{r}
+#install.packages("car")
+library(car)
+vif(train_model)
+```
+
+Step() iteratively includes or removes each variable from the model to tell you if it is worth including each variable or not. The best model will have the lowest RSS (Residual Sum of Squares) and AIC (Akaike Information Criterion).
+
+```{r}
+forward_model <- step(train_model, direction = "forward")
+
+summary(forward_model)
+```
+
+```{r}
+stepwise_model <- step(train_model, direction = "both")
+
+summary(stepwise_model)
+```
+
+```{r}
+backward_model <- step(train_model, direction = "both")
+
+summary(backward_model)
+```
+
+Model analysis:
+Residuals vs. Fitted should look like random scatter centered around 0.
+Q-Q Residuals should fall along the diagonal line to indicate a normal distribution of residuals.
+Scale-Location should look like random scatter around a straight line indicating similar variance in residuals.
+Residuals vs. Leverage should look like a random scatter around a line.
+```{r}
+plot(train_model)
+```
+
+Lets put our model to use by making predictions! First lets fit the model to the test data set part of the 20% split.
+```{r}
+perIndex <- test_df$Performance.Index
+hours <- test_df$Hours.Studied
+scores <- test_df$Previous.Score
+extra <- test_df$Extracurricular.Activities
+sleep <- test_df$Sleep.Hours
+practice <- test_df$Sample.Question.Papers.Practiced
+test_model <- lm(perIndex ~ hours + scores + extra + sleep + practice, data = test_df)
+```
+
+```{r}
+summary(test_model)
+```
+
+Predict values
+```{r}
+pred_df<- test_df[, !names(test_df) %in% 'Performance.Index']
+predictions <- predict(test_model, data= pred_df)
+print(head(predictions))
+```
+
+Create data frame to show our predictions with their corresponding actual values.
+```{r}
+results_df <- data.frame(Actual= perIndex, Predicted =predictions)
+print(head(results_df))
+```
+
+Individual prediction of a student:
+```{r}
+singleStudent<- data.frame(hours=10, scores=79, extra=1, sleep=6, practice=2)
+print(singleStudent)
+
+predicted_value <- predict(test_model, newdata= singleStudent)
+print(predicted_value)
+```
+
+Accuracy Check
+
+Calculate Root Mean Squared Error which is a value that tells us the average amount of deviation from true values. We use this to compare performance across different models. This value is sensitive to larger differences, so we still encounter differences greater than the resulting RMSE.
+```{r}
+mse <- sqrt(mean((perIndex - predictions)^2))
+
+print(mse)
+```
+
+Average difference between Predicted vs. Actual
+```{r}
+absDiff <- abs(results_df$Actual-results_df$Predicted)
+meanDiff <- sum(absDiff)/length(absDiff)
+print(meanDiff)
+```
+
+Check for values within certain ranges
+```{r}
+withinX <- ifelse(absDiff < 3, 1, 0)
+print(sum(withinX)/length(withinX))
+```
+
+Check for values within certain percentages
+```{r}
+accuracyWithinX <- ifelse(abs(results_df$Predicted-results_df$Actual) < 0.10*results_df$Actual,1,0)
+print(sum(accuracyWithinX/length(accuracyWithinX)))
+```
+
+
+
+
+
+
+
+
+
+
